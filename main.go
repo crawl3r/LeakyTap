@@ -25,7 +25,10 @@ func main() {
 
 	for sc.Scan() {
 		domain := strings.ToLower(sc.Text())
-		urls = append(urls, domain)
+
+		if domain != "" && len(domain) > 0 {
+			urls = append(urls, domain)
+		}
 	}
 
 	var outputFileFlag string
