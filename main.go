@@ -150,7 +150,15 @@ func getEndpointFileExtension(url string) string {
 	endpointExtensionSplit := strings.Split(splitByParam[0], ".") // from www.url.com/lol/lol.php -> "www.url.com/lol/lol","php"
 
 	if len(endpointExtensionSplit) > 1 {
-		return endpointExtensionSplit[len(endpointExtensionSplit)-1]
+		// working extensions:
+		ep := endpointExtensionSplit[len(endpointExtensionSplit)-1]
+
+		// only return an extension if it's legal. This will skip the request if not.
+		if ep == "php" {
+			return ep
+		}
+
+		return ""
 	} else {
 		return ""
 	}
