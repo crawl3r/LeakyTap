@@ -5,10 +5,10 @@ At first this seems pretty pointless, but actually it might help someone else? M
 This tool just tries to help automate that by allowing a user to pipe a list of URLs in via stdin and spitting out any results.
 
 ## Installing  
-1) clone git
-2) cd into repository
-3) go build .
-
+```
+go get github.com/crawl3r/LeakyTap
+```  
+  
 ## Standard Run  
 ```
 cat urls.txt | ./leakytap
