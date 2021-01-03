@@ -4,6 +4,12 @@ At first this seems pretty pointless, but actually it might help someone else? M
 
 This tool just tries to help automate that by allowing a user to pipe a list of URLs in via stdin and spitting out any results.
 
+Any issues, let me know! I plan to extend the source code it can identify, so if there are specific requests please let me know.
+
+### Thanks  
+  
+Big thanks to Hakluke, I used Hakrawler's (https://github.com/hakluke/hakrawler) concurrency and picked at the concurrency/goroutine code to patch mine.
+
 ## Installing  
 ```
 go get github.com/crawl3r/LeakyTap
