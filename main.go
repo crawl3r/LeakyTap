@@ -4,11 +4,14 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"strings"
+	"sync"
+	"time"
 )
 
 /*
@@ -19,17 +22,21 @@ import (
 	Reason: First paying bounty was a server PHP source leak. Server wasn't interpreting and returned the file (LFI type result with no LFI needed).
 */
 
+var out io.Writer = os.Stdout
+
 func main() {
-	sc := bufio.NewScanner(os.Stdin)
-	urls := []string{}
+	/*
+		sc := bufio.NewScanner(os.Stdin)
+		urls := []string{}
 
-	for sc.Scan() {
-		domain := strings.ToLower(sc.Text())
+		for sc.Scan() {
+			domain := strings.ToLower(sc.Text())
 
-		if domain != "" && len(domain) > 0 {
-			urls = append(urls, domain)
+			if domain != "" && len(domain) > 0 {
+				urls = append(urls, domain)
+			}
 		}
-	}
+	*/
 
 	var outputFileFlag string
 	flag.StringVar(&outputFileFlag, "o", "", "Output file for identified leakd source")
@@ -45,31 +52,65 @@ func main() {
 		fmt.Println("")
 	}
 
-	for _, u := range urls {
-		finalUrls := []string{}
+	writer := bufio.NewWriter(out)
+	urls := make(chan string, 1)
+	var wg sync.WaitGroup
 
-		// If the identified URL has neither http or https infront of it. Create both and scan them.
-		if !strings.Contains(u, "http://") && !strings.Contains(u, "https://") {
-			finalUrls = append(finalUrls, "http://"+u)
-			finalUrls = append(finalUrls, "https://"+u)
-		} else {
-			// else, just scan the submitted one as it has either protocol
-			finalUrls = append(finalUrls, u)
+	ch := readStdin()
+	go func() {
+		//translate stdin channel to domains channel
+		for u := range ch {
+			urls <- u
 		}
+		close(urls)
+	}()
 
-		// now loop the slice of finalUrls (either submitted OR 2 urls with http/https appended to them)
-		for _, uu := range finalUrls {
-			leaks, ext := makeRequest(uu, quietMode)
-			if leaks {
-				// if we had a leak, let the user know
-				fmt.Printf("[%s] %s\n", ext, uu)
-
-				if saveOutput {
-					outputToSave = append(outputToSave, uu)
-				}
+	// flush to writer periodically
+	t := time.NewTicker(time.Millisecond * 500)
+	defer t.Stop()
+	go func() {
+		for {
+			select {
+			case <-t.C:
+				writer.Flush()
 			}
 		}
+	}()
+
+	for u := range urls {
+		wg.Add(1)
+		go func(site string) {
+			defer wg.Done()
+			finalUrls := []string{}
+
+			// If the identified URL has neither http or https infront of it. Create both and scan them.
+			if !strings.Contains(u, "http://") && !strings.Contains(u, "https://") {
+				finalUrls = append(finalUrls, "http://"+u)
+				finalUrls = append(finalUrls, "https://"+u)
+			} else {
+				// else, just scan the submitted one as it has either protocol
+				finalUrls = append(finalUrls, u)
+			}
+
+			// now loop the slice of finalUrls (either submitted OR 2 urls with http/https appended to them)
+			for _, uu := range finalUrls {
+				leaks, ext := makeRequest(uu, quietMode)
+				if leaks {
+					// if we had a leak, let the user know
+					fmt.Printf("[%s] %s\n", ext, uu)
+
+					if saveOutput {
+						outputToSave = append(outputToSave, uu)
+					}
+				}
+			}
+		}(u)
 	}
+
+	wg.Wait()
+
+	// just in case anything is still in buffer
+	writer.Flush()
 
 	if saveOutput {
 		file, err := os.OpenFile(outputFileFlag, os.O_CREATE|os.O_WRONLY, 0644)
@@ -96,6 +137,21 @@ func banner() {
 	fmt.Printf("Currently looks for:\n\tphp\n\n")
 	fmt.Println("Run again with -q for cleaner output")
 	fmt.Println("---------------------------------------------------")
+}
+
+func readStdin() <-chan string {
+	lines := make(chan string)
+	go func() {
+		defer close(lines)
+		sc := bufio.NewScanner(os.Stdin)
+		for sc.Scan() {
+			url := strings.ToLower(sc.Text())
+			if url != "" {
+				lines <- url
+			}
+		}
+	}()
+	return lines
 }
 
 func makeRequest(url string, quietMode bool) (bool, string) {
