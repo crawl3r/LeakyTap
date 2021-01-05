@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,7 @@ import (
 	Reason: First paying bounty was a server PHP source leak. Server wasn't interpreting and returned the file (LFI type result with no LFI needed).
 */
 
+var aspRegex = regexp.MustCompile(`(?m)(\@page|\@model)`)
 var out io.Writer = os.Stdout
 
 func main() {
@@ -98,10 +100,15 @@ func main() {
 
 			// now loop the slice of finalUrls (either submitted OR 2 urls with http/https appended to them)
 			for _, uu := range finalUrls {
-				leaks, ext := makeRequest(uu, quietMode)
-				if leaks {
+				leaks := makeRequest(uu, quietMode)
+				if leaks == nil {
+					continue
+				}
+
+				if len(leaks) > 0 {
 					// if we had a leak, let the user know
-					fmt.Printf("[%s] %s\n", ext, uu)
+					possibleExtensions := strings.Join(leaks[:], "|")
+					fmt.Printf("[%s] %s\n", possibleExtensions, uu)
 
 					if saveOutput {
 						outputToSave = append(outputToSave, uu)
@@ -158,13 +165,14 @@ func readStdin() <-chan string {
 	return lines
 }
 
-func makeRequest(url string, quietMode bool) (bool, string) {
+func makeRequest(url string, quietMode bool) []string {
 	targetExtension := getEndpointFileExtension(url)
+
+	// TODO: it's likely we probably still want to scan these for leaked source as some source can leak without an extension :/
 	if targetExtension == "" {
 		if !quietMode {
-			fmt.Println("No extension identified for", url, " - skipping")
+			fmt.Println("[warning] No extension identified for", url)
 		}
-		return false, ""
 	}
 
 	resp, err := http.Get(url)
@@ -172,7 +180,7 @@ func makeRequest(url string, quietMode bool) (bool, string) {
 		if !quietMode {
 			fmt.Println("[error] performing the request to:", url)
 		}
-		return false, ""
+		return nil
 	}
 	defer resp.Body.Close()
 
@@ -182,30 +190,43 @@ func makeRequest(url string, quietMode bool) (bool, string) {
 			if !quietMode {
 				fmt.Println("[error] reading response bytes from:", url)
 			}
-			return false, ""
+			return nil
 		}
 		bodyString := string(bodyBytes)
-		return parseBodyForSource(targetExtension, bodyString, quietMode), targetExtension
-	} else {
-		return false, ""
+		return parseBodyForSource(targetExtension, bodyString, quietMode)
 	}
+
+	return nil
 }
 
-func parseBodyForSource(language string, body string, quietMode bool) bool {
+func parseBodyForSource(language string, body string, quietMode bool) []string {
 	lines := strings.Split(body, "\n")
 	if len(lines) == 0 {
 		if !quietMode {
 			fmt.Println("Empty response body during parse")
 		}
-		return false
+		return nil
 	}
 
 	// logic here based on the identified language. Should be easy enough to extend
-	if language == "php" {
-		return strings.Contains(lines[0], "<?php") || strings.Contains(lines[len(lines)-1], "?>")
+
+	if language != "" {
+		if !quietMode {
+			fmt.Println("Language was identified from extension:", language)
+		}
 	}
 
-	return false
+	possibleLanguages := []string{}
+
+	if strings.Contains(lines[0], "<?php") || strings.Contains(lines[len(lines)-1], "?>") {
+		possibleLanguages = append(possibleLanguages, "php")
+	}
+
+	if len(aspRegex.FindAllString(body, -1)) > 0 {
+		possibleLanguages = append(possibleLanguages, "asp")
+	}
+
+	return possibleLanguages
 }
 
 func getEndpointFileExtension(url string) string {
@@ -218,6 +239,8 @@ func getEndpointFileExtension(url string) string {
 
 		// only return an extension if it's legal. This will skip the request if not.
 		if ep == "php" {
+			return ep
+		} else if ep == "asp" {
 			return ep
 		}
 
