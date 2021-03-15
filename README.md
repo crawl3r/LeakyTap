@@ -12,7 +12,7 @@ Big thanks to Hakluke, I used Hakrawler's (https://github.com/hakluke/hakrawler)
 
 ## Installing  
 ```
-go get github.com/crawl3r/LeakyTap
+go get github.com/crawl3r/leakyTap
 ```  
   
 ## Usage  
